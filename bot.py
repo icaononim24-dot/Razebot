@@ -19,7 +19,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # НАСТРОЙКИ
 # =========================================================
 
-TOKEN = "8890721927:AAE-lJnSNFCpA1VX1jiwfGNRDHqQTafKUaY"
+TOKEN = "8791465958:AAGKi_Cebi5uG6B74ja6UPH4AH8H2ntxaXA"
 
 CRYPTO_BOT_TOKEN = "584710:AAtD87zzLOvKArMkihQt1Q1bUVL2kLKzvru"
 
@@ -62,6 +62,8 @@ class AdminStates(StatesGroup):
     editing_price = State()
     editing_descr = State()
 
+    editing_category_name = State()
+
 # =========================================================
 # КНОПКИ
 # =========================================================
@@ -90,6 +92,7 @@ admin_panel = ReplyKeyboardMarkup(
         [KeyboardButton(text="📂 Категории")],
         [KeyboardButton(text="+ Добавить товар")],
         [KeyboardButton(text="✏️ Редактировать товар")],
+        [KeyboardButton(text="🗂 Редактировать категории")],
         [KeyboardButton(text="🚪 Выход")]
     ],
     resize_keyboard=True
@@ -113,23 +116,18 @@ async def create_invoice(amount):
         "description": "Покупка товара"
     }
 
-    try:
+    async with aiohttp.ClientSession() as session:
 
-        async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=payload,
+            headers=headers
+        ) as response:
 
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers
-            ) as response:
+            data = await response.json()
 
-                data = await response.json()
-
-                if data.get("ok"):
-                    return data["result"]
-
-    except Exception as e:
-        print("Ошибка create_invoice:", e)
+            if data.get("ok"):
+                return data["result"]
 
     return None
 
@@ -146,32 +144,25 @@ async def check_invoice(invoice_id):
         "invoice_ids": invoice_id
     }
 
-    try:
+    async with aiohttp.ClientSession() as session:
 
-        async with aiohttp.ClientSession() as session:
+        async with session.get(
+            url,
+            headers=headers,
+            params=params
+        ) as response:
 
-            async with session.get(
-                url,
-                headers=headers,
-                params=params
-            ) as response:
+            data = await response.json()
 
-                data = await response.json()
+            if not data.get("ok"):
+                return False
 
-                if not data.get("ok"):
-                    return False
+            items = data["result"]["items"]
 
-                items = data["result"]["items"]
+            if not items:
+                return False
 
-                if not items:
-                    return False
-
-                return items[0]["status"] == "paid"
-
-    except Exception as e:
-        print("Ошибка check_invoice:", e)
-
-    return False
+            return items[0]["status"] == "paid"
 
 # =========================================================
 # START
@@ -213,7 +204,6 @@ async def support(message: Message):
 async def show_categories(message: Message):
 
     if not DB_CATEGORIES:
-
         await message.answer("❌ Категорий нет")
         return
 
@@ -236,14 +226,13 @@ async def show_categories(message: Message):
     )
 
 # =========================================================
-# ТОВАР В НАЛИЧИИ
+# НАЛИЧИЕ
 # =========================================================
 
 @dp.message(F.text == "📊 Товар в наличии")
 async def stock_products(message: Message):
 
     if not DB_PRODUCTS:
-
         await message.answer("❌ Товаров нет")
         return
 
@@ -253,7 +242,7 @@ async def stock_products(message: Message):
 
     for cat_id, products in DB_PRODUCTS.items():
 
-        category_name = DB_CATEGORIES.get(cat_id, "Категория")
+        category_name = DB_CATEGORIES.get(cat_id)
 
         text += f"➖➖➖📦 {category_name} 📦➖➖➖\n"
 
@@ -290,53 +279,7 @@ async def show_products(call: CallbackQuery, state: FSMContext):
     products = DB_PRODUCTS.get(cat_id, [])
 
     if not products:
-
         await call.answer("❌ Товаров нет")
-        return
-
-    if len(products) == 1:
-
-        product = products[0]
-
-        await state.update_data(
-            cat_id=cat_id,
-            product_index=0,
-            price=product["price"]
-        )
-
-        qty = len(product["data"])
-
-        text = (
-            f"📦 Товар: {product['name']}\n\n"
-
-            f"💰 Цена: {product['price']}$\n"
-            f"📊 Наличие: {qty} шт.\n\n"
-
-            f"📝 Описание:\n"
-            f"{product['descr']}"
-        )
-
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    text="💳 Купить",
-                    callback_data="buy_product"
-                )
-            ]
-        ]
-
-        await call.message.delete()
-
-        await bot.send_photo(
-            chat_id=call.message.chat.id,
-            photo=product["photo"],
-            caption=text,
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=buttons
-            )
-        )
-
-        await call.answer()
         return
 
     buttons = []
@@ -362,7 +305,7 @@ async def show_products(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 # =========================================================
-# КАРТОЧКА ТОВАРА
+# КАРТОЧКА
 # =========================================================
 
 @dp.callback_query(F.data.startswith("product:"))
@@ -384,10 +327,8 @@ async def product_card(call: CallbackQuery, state: FSMContext):
 
     text = (
         f"📦 Товар: {product['name']}\n\n"
-
         f"💰 Цена: {product['price']}$\n"
         f"📊 Наличие: {qty} шт.\n\n"
-
         f"📝 Описание:\n"
         f"{product['descr']}"
     )
@@ -428,11 +369,7 @@ async def buy_product(call: CallbackQuery, state: FSMContext):
     invoice = await create_invoice(amount)
 
     if not invoice:
-
-        await call.message.answer(
-            "❌ Ошибка создания счета"
-        )
-
+        await call.message.answer("❌ Ошибка создания счета")
         return
 
     buttons = [
@@ -456,8 +393,6 @@ async def buy_product(call: CallbackQuery, state: FSMContext):
             inline_keyboard=buttons
         )
     )
-
-    await call.answer()
 
 # =========================================================
 # ПРОВЕРКА ОПЛАТЫ
@@ -488,11 +423,7 @@ async def check_payment(call: CallbackQuery, state: FSMContext):
     product = DB_PRODUCTS[cat_id][product_index]
 
     if not product["data"]:
-
-        await call.message.answer(
-            "❌ Товар закончился"
-        )
-
+        await call.message.answer("❌ Товар закончился")
         return
 
     item = product["data"].pop(0)
@@ -501,8 +432,6 @@ async def check_payment(call: CallbackQuery, state: FSMContext):
         f"✅ Оплата прошла\n\n📦 Ваш товар:\n\n`{item}`",
         parse_mode="Markdown"
     )
-
-    await call.answer()
 
 # =========================================================
 # АДМИНКА
@@ -520,14 +449,11 @@ async def admin(message: Message):
     )
 
 # =========================================================
-# КАТЕГОРИИ
+# ДОБАВЛЕНИЕ КАТЕГОРИИ
 # =========================================================
 
 @dp.message(F.text == "📂 Категории")
 async def categories(message: Message):
-
-    if message.from_user.id != ADMIN_ID:
-        return
 
     buttons = [
         [
@@ -548,15 +474,11 @@ async def categories(message: Message):
 @dp.callback_query(F.data == "add_category")
 async def add_category(call: CallbackQuery, state: FSMContext):
 
-    await call.message.answer(
-        "Введите название категории"
-    )
+    await call.message.answer("Введите название категории")
 
     await state.set_state(
         AdminStates.adding_category
     )
-
-    await call.answer()
 
 @dp.message(AdminStates.adding_category)
 async def save_category(message: Message, state: FSMContext):
@@ -583,17 +505,6 @@ async def save_category(message: Message, state: FSMContext):
 
 @dp.message(F.text == "+ Добавить товар")
 async def add_product(message: Message):
-
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    if not DB_CATEGORIES:
-
-        await message.answer(
-            "❌ Сначала создайте категорию"
-        )
-
-        return
 
     buttons = []
 
@@ -622,15 +533,11 @@ async def add_product_category(call: CallbackQuery, state: FSMContext):
         selected_category=cat_id
     )
 
-    await call.message.answer(
-        "Введите название товара"
-    )
+    await call.message.answer("Введите название товара")
 
     await state.set_state(
         AdminStates.entering_prod_name
     )
-
-    await call.answer()
 
 @dp.message(AdminStates.entering_prod_name)
 async def product_name(message: Message, state: FSMContext):
@@ -639,9 +546,7 @@ async def product_name(message: Message, state: FSMContext):
         product_name=message.text
     )
 
-    await message.answer(
-        "Введите цену товара"
-    )
+    await message.answer("Введите цену товара")
 
     await state.set_state(
         AdminStates.entering_prod_price
@@ -650,20 +555,13 @@ async def product_name(message: Message, state: FSMContext):
 @dp.message(AdminStates.entering_prod_price)
 async def product_price(message: Message, state: FSMContext):
 
-    try:
-        price = float(message.text)
-
-    except:
-        await message.answer("Введите число")
-        return
+    price = float(message.text)
 
     await state.update_data(
         product_price=price
     )
 
-    await message.answer(
-        "Введите описание товара"
-    )
+    await message.answer("Введите описание товара")
 
     await state.set_state(
         AdminStates.entering_prod_descr
@@ -676,17 +574,11 @@ async def product_descr(message: Message, state: FSMContext):
         product_descr=message.text
     )
 
-    await message.answer(
-        "Отправьте фото товара"
-    )
+    await message.answer("Отправьте фото товара")
 
     await state.set_state(
         AdminStates.entering_prod_photo
     )
-
-# =========================================================
-# ФОТО
-# =========================================================
 
 @dp.message(AdminStates.entering_prod_photo, F.photo)
 async def product_photo(message: Message, state: FSMContext):
@@ -697,17 +589,11 @@ async def product_photo(message: Message, state: FSMContext):
         product_photo=photo_id
     )
 
-    await message.answer(
-        "Отправьте товары построчно"
-    )
+    await message.answer("Отправьте товары построчно")
 
     await state.set_state(
         AdminStates.entering_prod_data
     )
-
-# =========================================================
-# СОХРАНЕНИЕ ТОВАРА
-# =========================================================
 
 @dp.message(AdminStates.entering_prod_data)
 async def product_finish(message: Message, state: FSMContext):
@@ -739,14 +625,11 @@ async def product_finish(message: Message, state: FSMContext):
     await state.clear()
 
 # =========================================================
-# РЕДАКТИРОВАНИЕ
+# РЕДАКТИРОВАНИЕ ТОВАРА
 # =========================================================
 
 @dp.message(F.text == "✏️ Редактировать товар")
 async def edit_products(message: Message):
-
-    if message.from_user.id != ADMIN_ID:
-        return
 
     buttons = []
 
@@ -760,11 +643,6 @@ async def edit_products(message: Message):
                     callback_data=f"edit:{cat_id}:{index}"
                 )
             ])
-
-    if not buttons:
-
-        await message.answer("❌ Товаров нет")
-        return
 
     await message.answer(
         "✏️ Выберите товар",
@@ -788,32 +666,148 @@ async def edit_product_menu(call: CallbackQuery, state: FSMContext):
     buttons = [
         [
             InlineKeyboardButton(
-                text="✏️ Название",
+                text="✏️ Изменить название",
                 callback_data="edit_name"
             )
         ],
         [
             InlineKeyboardButton(
-                text="💰 Цена",
+                text="💰 Изменить цену",
                 callback_data="edit_price"
             )
         ],
         [
             InlineKeyboardButton(
-                text="📝 Описание",
+                text="📝 Изменить описание",
                 callback_data="edit_descr"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🗑 Удалить товар",
+                callback_data="delete_product"
             )
         ]
     ]
 
     await call.message.edit_text(
-        "⚙️ Что хотите изменить?",
+        "⚙️ Управление товаром",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=buttons
         )
     )
 
-    await call.answer()
+@dp.callback_query(F.data == "delete_product")
+async def delete_product(call: CallbackQuery, state: FSMContext):
+
+    data = await state.get_data()
+
+    cat_id = data["edit_cat_id"]
+    index = data["edit_index"]
+
+    del DB_PRODUCTS[cat_id][index]
+
+    await call.message.edit_text("🗑 Товар удален")
+
+    await state.clear()
+
+# =========================================================
+# РЕДАКТИРОВАНИЕ КАТЕГОРИЙ
+# =========================================================
+
+@dp.message(F.text == "🗂 Редактировать категории")
+async def edit_categories(message: Message):
+
+    buttons = []
+
+    for cat_id, cat_name in DB_CATEGORIES.items():
+
+        buttons.append([
+            InlineKeyboardButton(
+                text=cat_name,
+                callback_data=f"editcat:{cat_id}"
+            )
+        ])
+
+    await message.answer(
+        "🗂 Выберите категорию",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
+    )
+
+@dp.callback_query(F.data.startswith("editcat:"))
+async def category_edit_menu(call: CallbackQuery, state: FSMContext):
+
+    cat_id = call.data.split(":")[1]
+
+    await state.update_data(
+        edit_category_id=cat_id
+    )
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text="✏️ Изменить название",
+                callback_data="rename_category"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🗑 Удалить категорию",
+                callback_data="delete_category"
+            )
+        ]
+    ]
+
+    await call.message.edit_text(
+        "⚙️ Управление категорией",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=buttons
+        )
+    )
+
+@dp.callback_query(F.data == "rename_category")
+async def rename_category(call: CallbackQuery, state: FSMContext):
+
+    await call.message.answer(
+        "Введите новое название категории"
+    )
+
+    await state.set_state(
+        AdminStates.editing_category_name
+    )
+
+@dp.message(AdminStates.editing_category_name)
+async def save_new_category_name(message: Message, state: FSMContext):
+
+    data = await state.get_data()
+
+    cat_id = data["edit_category_id"]
+
+    DB_CATEGORIES[cat_id] = message.text
+
+    await message.answer(
+        "✅ Название категории изменено"
+    )
+
+    await state.clear()
+
+@dp.callback_query(F.data == "delete_category")
+async def delete_category(call: CallbackQuery, state: FSMContext):
+
+    data = await state.get_data()
+
+    cat_id = data["edit_category_id"]
+
+    del DB_CATEGORIES[cat_id]
+    del DB_PRODUCTS[cat_id]
+
+    await call.message.edit_text(
+        "🗑 Категория удалена"
+    )
+
+    await state.clear()
 
 # =========================================================
 # ИЗМЕНЕНИЕ НАЗВАНИЯ
@@ -822,15 +816,11 @@ async def edit_product_menu(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "edit_name")
 async def edit_name(call: CallbackQuery, state: FSMContext):
 
-    await call.message.answer(
-        "Введите новое название"
-    )
+    await call.message.answer("Введите новое название")
 
     await state.set_state(
         AdminStates.editing_name
     )
-
-    await call.answer()
 
 @dp.message(AdminStates.editing_name)
 async def save_new_name(message: Message, state: FSMContext):
@@ -838,14 +828,11 @@ async def save_new_name(message: Message, state: FSMContext):
     data = await state.get_data()
 
     cat_id = data["edit_cat_id"]
-
     index = data["edit_index"]
 
     DB_PRODUCTS[cat_id][index]["name"] = message.text
 
-    await message.answer(
-        "✅ Название изменено"
-    )
+    await message.answer("✅ Название изменено")
 
     await state.clear()
 
@@ -856,37 +843,23 @@ async def save_new_name(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "edit_price")
 async def edit_price(call: CallbackQuery, state: FSMContext):
 
-    await call.message.answer(
-        "Введите новую цену"
-    )
+    await call.message.answer("Введите новую цену")
 
     await state.set_state(
         AdminStates.editing_price
     )
 
-    await call.answer()
-
 @dp.message(AdminStates.editing_price)
 async def save_new_price(message: Message, state: FSMContext):
-
-    try:
-        price = float(message.text)
-
-    except:
-        await message.answer("Введите число")
-        return
 
     data = await state.get_data()
 
     cat_id = data["edit_cat_id"]
-
     index = data["edit_index"]
 
-    DB_PRODUCTS[cat_id][index]["price"] = price
+    DB_PRODUCTS[cat_id][index]["price"] = float(message.text)
 
-    await message.answer(
-        "✅ Цена изменена"
-    )
+    await message.answer("✅ Цена изменена")
 
     await state.clear()
 
@@ -897,15 +870,11 @@ async def save_new_price(message: Message, state: FSMContext):
 @dp.callback_query(F.data == "edit_descr")
 async def edit_descr(call: CallbackQuery, state: FSMContext):
 
-    await call.message.answer(
-        "Введите новое описание"
-    )
+    await call.message.answer("Введите новое описание")
 
     await state.set_state(
         AdminStates.editing_descr
     )
-
-    await call.answer()
 
 @dp.message(AdminStates.editing_descr)
 async def save_new_descr(message: Message, state: FSMContext):
@@ -913,14 +882,11 @@ async def save_new_descr(message: Message, state: FSMContext):
     data = await state.get_data()
 
     cat_id = data["edit_cat_id"]
-
     index = data["edit_index"]
 
     DB_PRODUCTS[cat_id][index]["descr"] = message.text
 
-    await message.answer(
-        "✅ Описание изменено"
-    )
+    await message.answer("✅ Описание изменено")
 
     await state.clear()
 
@@ -930,9 +896,6 @@ async def save_new_descr(message: Message, state: FSMContext):
 
 @dp.message(F.text == "🚪 Выход")
 async def exit_admin(message: Message):
-
-    if message.from_user.id != ADMIN_ID:
-        return
 
     await message.answer(
         "Вы вышли из админки",
