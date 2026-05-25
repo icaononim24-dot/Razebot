@@ -101,6 +101,17 @@ editor_panel = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Список всех системных кнопок для предотвращения багов FSM
+SYSTEM_BUTTONS = [
+    "💵 Купить", "📊 Товар в наличии", "💬 Поддержка", "⚙️ Админка",
+    "🛠 Редактор", "🚪 Выход", "📂 Категории", "+ Добавить товар",
+    "✏️ Редактировать товар", "⬅️ Назад в админку"
+]
+
+# Фильтр, проверяющий, что текст не является системной кнопкой
+def is_not_button(message: Message) -> bool:
+    return message.text not in SYSTEM_BUTTONS
+
 
 # =========================================================
 # CRYPTO BOT API
@@ -149,7 +160,8 @@ async def check_invoice(invoice_id):
 # =========================================================
 
 @dp.message(F.text == "/start")
-async def start(message: Message):
+async def start(message: Message, state: FSMContext):
+    await state.clear()
     if message.from_user.id == ADMIN_ID:
         await message.answer("⚡ Добро пожаловать в RazeShop", reply_markup=admin_menu)
     else:
@@ -161,7 +173,8 @@ async def start(message: Message):
 # =========================================================
 
 @dp.message(F.text == "💬 Поддержка")
-async def support(message: Message):
+async def support(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer("💬 Техническая поддержка : @RazeShopsupport")
 
 
@@ -170,7 +183,8 @@ async def support(message: Message):
 # =========================================================
 
 @dp.message(F.text == "💵 Купить")
-async def show_categories(message: Message):
+async def show_categories(message: Message, state: FSMContext):
+    await state.clear()
     if not DB_CATEGORIES:
         await message.answer("❌ Категорий нет")
         return
@@ -187,7 +201,8 @@ async def show_categories(message: Message):
 # =========================================================
 
 @dp.message(F.text == "📊 Товар в наличии")
-async def stock_products(message: Message):
+async def stock_products(message: Message, state: FSMContext):
+    await state.clear()
     if not DB_PRODUCTS:
         await message.answer("❌ Товаров нет")
         return
@@ -196,7 +211,7 @@ async def stock_products(message: Message):
     total = 0
     for cat_id, products in DB_PRODUCTS.items():
         category_name = DB_CATEGORIES.get(cat_id, "Категория")
-        text += f"➖➖➖📦 {category_name} 📦➖➖➖\n"
+        text += f"➖➖推📦 {category_name} 📦➖➖➖\n"
         for product in products:
             qty = len(product["data"])
             if qty <= 0:
@@ -364,37 +379,40 @@ async def check_payment(call: CallbackQuery, state: FSMContext):
 # =========================================================
 
 @dp.message(F.text == "⚙️ Админка")
-async def admin(message: Message):
+async def admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     await message.answer("⚙️ Админ панель", reply_markup=admin_panel)
 
 
 @dp.message(F.text == "🛠 Редактор")
-async def open_editor(message: Message):
+async def open_editor(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     await message.answer("🛠 Меню управления магазином", reply_markup=editor_panel)
 
 
 @dp.message(F.text == "⬅️ Назад в админку")
-async def back_to_admin(message: Message):
+async def back_to_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     await message.answer("⚙️ Возврат в главное админ-меню", reply_markup=admin_panel)
 
 
 # =========================================================
-# УПРАВЛЕНИЕ КАТЕГОРИЯМИ (ИСПРАВЛЕНО И ДОБАВЛЕНО)
+# УПРАВЛЕНИЕ КАТЕГОРИЯМИ
 # =========================================================
 
 @dp.message(F.text == "📂 Категории")
-async def categories(message: Message):
+async def categories(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
 
     buttons = []
-    # Вывод существующих категорий для их настройки/редактирования
     for cat_id, cat_name in DB_CATEGORIES.items():
         buttons.append([InlineKeyboardButton(text=f"⚙️ {cat_name}", callback_data=f"manage_cat:{cat_id}")])
 
@@ -410,7 +428,7 @@ async def add_category(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.adding_category)
+@dp.message(AdminStates.adding_category, is_not_button)
 async def save_category(message: Message, state: FSMContext):
     global cat_counter
     cat_counter += 1
@@ -423,7 +441,6 @@ async def save_category(message: Message, state: FSMContext):
     await state.clear()
 
 
-# Меню управления конкретной категорией (Редактор категорий)
 @dp.callback_query(F.data.startswith("manage_cat:"))
 async def manage_category_menu(call: CallbackQuery, state: FSMContext):
     cat_id = call.data.split(":")[1]
@@ -440,7 +457,6 @@ async def manage_category_menu(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-# Изменение названия категории
 @dp.callback_query(F.data == "edit_cat_name")
 async def edit_category_name(call: CallbackQuery, state: FSMContext):
     await call.message.answer("Введите новое название для категории:")
@@ -448,7 +464,7 @@ async def edit_category_name(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.editing_category_name)
+@dp.message(AdminStates.editing_category_name, is_not_button)
 async def save_edited_category_name(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data.get("selected_cat_id")
@@ -462,7 +478,6 @@ async def save_edited_category_name(message: Message, state: FSMContext):
     await state.clear()
 
 
-# Удаление категории вместе со всеми её товарами
 @dp.callback_query(F.data == "delete_cat")
 async def delete_category(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -472,7 +487,7 @@ async def delete_category(call: CallbackQuery, state: FSMContext):
         cat_name = DB_CATEGORIES[cat_id]
         DB_CATEGORIES.pop(cat_id)
         if cat_id in DB_PRODUCTS:
-            DB_PRODUCTS.pop(cat_id)  # Удаляем все товары, привязанные к этой категории
+            DB_PRODUCTS.pop(cat_id)
         await call.message.edit_text(f"🗑 Категория «{cat_name}» и все привязанные к ней товары успешно удалены.")
     else:
         await call.message.edit_text("❌ Ошибка при удалении категории.")
@@ -485,9 +500,10 @@ async def delete_category(call: CallbackQuery, state: FSMContext):
 # =========================================================
 
 @dp.message(F.text == "+ Добавить товар")
-async def add_product(message: Message):
+async def add_product(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     if not DB_CATEGORIES:
         await message.answer("❌ Сначала создайте категорию")
         return
@@ -508,14 +524,14 @@ async def add_product_category(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.entering_prod_name)
+@dp.message(AdminStates.entering_prod_name, is_not_button)
 async def product_name(message: Message, state: FSMContext):
     await state.update_data(product_name=message.text)
     await message.answer("Введите цену товара")
     await state.set_state(AdminStates.entering_prod_price)
 
 
-@dp.message(AdminStates.entering_prod_price)
+@dp.message(AdminStates.entering_prod_price, is_not_button)
 async def product_price(message: Message, state: FSMContext):
     try:
         price = float(message.text)
@@ -528,7 +544,7 @@ async def product_price(message: Message, state: FSMContext):
     await state.set_state(AdminStates.entering_prod_descr)
 
 
-@dp.message(AdminStates.entering_prod_descr)
+@dp.message(AdminStates.entering_prod_descr, is_not_button)
 async def product_descr(message: Message, state: FSMContext):
     await state.update_data(product_descr=message.text)
     await message.answer("Отправьте фото товара или введите /skip, чтобы продолжить создание без фото")
@@ -537,6 +553,11 @@ async def product_descr(message: Message, state: FSMContext):
 
 @dp.message(AdminStates.entering_prod_photo, F.photo | F.text)
 async def product_photo(message: Message, state: FSMContext):
+    # Если ввели текстовую системную кнопку во время ожидания фото
+    if message.text in SYSTEM_BUTTONS:
+        await state.clear()
+        return
+
     if message.text == "/skip":
         photo_id = None
         await message.answer("Шаг с фотографией пропущен.")
@@ -551,7 +572,7 @@ async def product_photo(message: Message, state: FSMContext):
     await state.set_state(AdminStates.entering_prod_data)
 
 
-@dp.message(AdminStates.entering_prod_data)
+@dp.message(AdminStates.entering_prod_data, is_not_button)
 async def product_finish(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data["selected_category"]
@@ -572,13 +593,14 @@ async def product_finish(message: Message, state: FSMContext):
 
 
 # =========================================================
-# РЕДАКТИРОВАНИЕ И УДАЛЕНИЕ ТОВАРОВ (ПОЛНОСТЬЮ ИСПРАВЛЕНО)
+# РЕДАКТИРОВАНИЕ И УДАЛЕНИЕ ТОВАРОВ
 # =========================================================
 
 @dp.message(F.text == "✏️ Редактировать товар")
-async def edit_products(message: Message):
+async def edit_products(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
 
     buttons = []
     for cat_id, products in DB_PRODUCTS.items():
@@ -610,14 +632,13 @@ async def edit_product_menu(call: CallbackQuery, state: FSMContext):
         [InlineKeyboardButton(text="✏️ Название", callback_data="edit_name")],
         [InlineKeyboardButton(text="💰 Цена", callback_data="edit_price")],
         [InlineKeyboardButton(text="📝 Описание", callback_data="edit_descr")],
-        [InlineKeyboardButton(text="🗑 Удалить товар", callback_data="edit_delete_prod")] # Кнопка удаления
+        [InlineKeyboardButton(text="🗑 Удалить товар", callback_data="edit_delete_prod")]
     ]
 
     await call.message.edit_text("⚙️ Что хотите изменить?", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     await call.answer()
 
 
-# Хэндлер удаления конкретного товара (Исправлено)
 @dp.callback_query(F.data == "edit_delete_prod")
 async def delete_product(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -626,7 +647,7 @@ async def delete_product(call: CallbackQuery, state: FSMContext):
 
     if cat_id in DB_PRODUCTS and 0 <= index < len(DB_PRODUCTS[cat_id]):
         product_name = DB_PRODUCTS[cat_id][index]["name"]
-        DB_PRODUCTS[cat_id].pop(index) # Корректное удаление из списка по индексу
+        DB_PRODUCTS[cat_id].pop(index)
         await call.message.edit_text(f"🗑 Товар «{product_name}» успешно удален.")
     else:
         await call.message.edit_text("❌ Ошибка при удалении: товар не найден.")
@@ -644,7 +665,7 @@ async def edit_restock(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.restocking_prod)
+@dp.message(AdminStates.restocking_prod, is_not_button)
 async def save_restocked_data(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data["edit_cat_id"]
@@ -673,7 +694,14 @@ async def save_restocked_data(message: Message, state: FSMContext):
 # ИЗМЕНЕНИЕ ХАРАКТЕРИСТИК (НАЗВАНИЕ, ЦЕНА, ОПИСАНИЕ)
 # =========================================================
 
-@dp.message(AdminStates.editing_name)
+@dp.callback_query(F.data == "edit_name")
+async def edit_name(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("Введите новое название")
+    await state.set_state(AdminStates.editing_name)
+    await call.answer()
+
+
+@dp.message(AdminStates.editing_name, is_not_button)
 async def save_new_name(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data["edit_cat_id"]
@@ -691,7 +719,7 @@ async def edit_price(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.editing_price)
+@dp.message(AdminStates.editing_price, is_not_button)
 async def save_new_price(message: Message, state: FSMContext):
     try:
         price = float(message.text)
@@ -715,7 +743,7 @@ async def edit_descr(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 
-@dp.message(AdminStates.editing_descr)
+@dp.message(AdminStates.editing_descr, is_not_button)
 async def save_new_descr(message: Message, state: FSMContext):
     data = await state.get_data()
     cat_id = data["edit_cat_id"]
@@ -726,21 +754,15 @@ async def save_new_descr(message: Message, state: FSMContext):
     await state.clear()
 
 
-@dp.callback_query(F.data == "edit_name")
-async def edit_name(call: CallbackQuery, state: FSMContext):
-    await call.message.answer("Введите новое название")
-    await state.set_state(AdminStates.editing_name)
-    await call.answer()
-
-
 # =========================================================
 # ВЫХОД ИЗ АДМИНКИ БОТА
 # =========================================================
 
 @dp.message(F.text == "🚪 Выход")
-async def exit_admin(message: Message):
+async def exit_admin(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     await message.answer("Вы вышли из админки", reply_markup=admin_menu)
 
 
